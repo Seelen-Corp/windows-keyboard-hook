@@ -2,7 +2,7 @@ use std::sync::LazyLock;
 
 use crossbeam_channel::{Receiver, Sender};
 
-use crate::{log_on_dev, state::KeyboardState};
+use crate::{log_on_dev, state::KeyboardState, VKey};
 
 static EVENT_LOOP_CHANNEL: LazyLock<(Sender<EventLoopEvent>, Receiver<EventLoopEvent>)> =
     LazyLock::new(crossbeam_channel::unbounded);
@@ -36,13 +36,13 @@ impl EventLoopEvent {
 pub enum KeyboardInputEvent {
     KeyDown {
         /// The virtual key code of the key.
-        vk_code: u16,
+        key: VKey,
         /// The updated keyboard state due to this event.
         state: KeyboardState,
     },
     KeyUp {
         /// The virtual key code of the key.
-        vk_code: u16,
+        key: VKey,
         /// The updated keyboard state due to this event.
         state: KeyboardState,
     },
@@ -53,7 +53,6 @@ pub enum KeyboardInputEvent {
 pub enum KeyAction {
     Allow,
     Block,
-    Replace,
 }
 
 impl KeyAction {

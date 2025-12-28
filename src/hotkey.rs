@@ -4,7 +4,6 @@
 
 use crate::state::KeyboardState;
 use crate::VKey;
-use std::collections::BTreeSet;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
@@ -18,16 +17,29 @@ pub enum TriggerBehavior {
     StopPropagation,
 }
 
+/// Defines when a hotkey should trigger
+#[derive(Debug, Clone, Copy, Hash, PartialEq, Eq)]
+pub enum TriggerTiming {
+    /// Trigger when the key combination is pressed down
+    OnKeyDown,
+    /// Trigger when the trigger key is released
+    OnKeyUp,
+}
+
 /// Represents a keyboard shortcut that triggers an action
 pub struct Hotkey {
     /// key that must be pressed to trigger this hotkey
     pub trigger_key: VKey,
+    /// when the hotkey should trigger (on key down or key up)
+    pub trigger_timing: TriggerTiming,
     /// keys that must be pressed before the trigger key ex: [CTRL] + [A]
-    pub modifiers: BTreeSet<VKey>,
+    pub modifiers: Vec<VKey>,
     /// action to perform when this hotkey is triggered
     pub behaviour: TriggerBehavior,
     /// will ignore the `paused` global state
     pub bypass_pause: bool,
+    /// if true, the hotkey will only trigger if keys was pressed in a strict sequence
+    pub strict_sequence: bool,
     /// callback function to execute when this hotkey is triggered
     pub callback: Arc<Box<dyn Fn() + Send + Sync + 'static>>,
 }
@@ -36,9 +48,11 @@ impl Hotkey {
     fn base() -> Hotkey {
         Hotkey {
             trigger_key: VKey::None,
-            modifiers: BTreeSet::new(),
+            modifiers: Vec::new(),
             behaviour: TriggerBehavior::StopPropagation,
+            trigger_timing: TriggerTiming::OnKeyDown,
             bypass_pause: false,
+            strict_sequence: false,
             callback: Arc::new(Box::new(|| {})),
         }
     }
@@ -52,8 +66,10 @@ impl Hotkey {
         Self {
             trigger_key,
             behaviour: TriggerBehavior::StopPropagation,
+            trigger_timing: TriggerTiming::OnKeyDown,
             bypass_pause: false,
-            modifiers: modifiers.as_ref().iter().cloned().collect(),
+            strict_sequence: false,
+            modifiers: modifiers.as_ref().to_vec(),
             callback: Arc::new(Box::new(callback)),
         }
     }
@@ -74,7 +90,7 @@ impl Hotkey {
     }
 
     pub fn modifiers<T: AsRef<[VKey]>>(mut self, keys: T) -> Self {
-        self.modifiers = keys.as_ref().iter().cloned().collect();
+        self.modifiers = keys.as_ref().to_vec();
         self
     }
 
@@ -87,6 +103,17 @@ impl Hotkey {
     /// Makes the hotkey work even when global hotkeys are paused
     pub fn bypass_pause(mut self) -> Self {
         self.bypass_pause = true;
+        self
+    }
+
+    pub fn strict_sequence(mut self) -> Self {
+        self.strict_sequence = true;
+        self
+    }
+
+    /// Sets when the hotkey should trigger (on key down or key up)
+    pub fn trigger_timing(mut self, timing: TriggerTiming) -> Self {
+        self.trigger_timing = timing;
         self
     }
 
@@ -106,16 +133,10 @@ impl Hotkey {
     /// Checks if current keyboard state should trigger hotkey callback.
     /// This should only be called if the most recent keypress is the
     /// trigger key for the hotkey.
-    pub fn is_trigger_state(&self, state: &KeyboardState) -> bool {
-        // For non-modifier keys, verify the last pressed key matches
-        if !self.trigger_key.is_modifier_key() {
-            let Some(last_pressed) = state.pressing.last() else {
-                return false;
-            };
-
-            if *last_pressed != self.trigger_key {
-                return false;
-            }
+    pub fn is_trigger_state(&self, changed: &VKey, state: &KeyboardState) -> bool {
+        // last changed key must be the trigger key
+        if self.trigger_key != *changed {
+            return false;
         }
 
         let expected_state = self.generate_expected_keyboard_state();
@@ -127,7 +148,20 @@ impl Hotkey {
             }
         }
 
+        if self.strict_sequence {
+            if expected_state.sequence.len() != state.sequence.len() {
+                return false;
+            }
+
+            for (i, key) in expected_state.sequence.iter().enumerate() {
+                if !key.matches(&state.sequence[i]) {
+                    return false;
+                }
+            }
+        }
+
         // Verify modifier key states match exactly
+        // example hotkey "Win + A" won't trigger if "Win + Alt + A" is pressed
         expected_state.is_win_pressed() == state.is_win_pressed()
             && expected_state.is_menu_pressed() == state.is_menu_pressed()
             && expected_state.is_shift_pressed() == state.is_shift_pressed()
@@ -137,10 +171,16 @@ impl Hotkey {
     /// Generates a `KeyboardState` representing the hotkey.
     pub fn generate_expected_keyboard_state(&self) -> KeyboardState {
         let mut keyboard_state = KeyboardState::new();
-        keyboard_state.keydown(self.trigger_key);
+
         for key in &self.modifiers {
             keyboard_state.keydown(*key);
         }
+
+        keyboard_state.keydown(self.trigger_key);
+        if self.trigger_timing == TriggerTiming::OnKeyUp {
+            keyboard_state.keyup(self.trigger_key);
+        }
+
         keyboard_state
     }
 
@@ -157,6 +197,7 @@ impl fmt::Debug for Hotkey {
         f.debug_struct("Hotkey")
             .field("trigger_key", &self.trigger_key)
             .field("trigger_action", &self.behaviour)
+            .field("trigger_timing", &self.trigger_timing)
             .field("modifiers", &self.modifiers)
             .field("callback", &"<callback>")
             .finish()
@@ -166,7 +207,9 @@ impl fmt::Debug for Hotkey {
 impl Eq for Hotkey {}
 impl PartialEq for Hotkey {
     fn eq(&self, other: &Self) -> bool {
-        self.trigger_key == other.trigger_key && self.modifiers == other.modifiers
+        self.trigger_key == other.trigger_key
+            && self.modifiers == other.modifiers
+            && self.trigger_timing == other.trigger_timing
     }
 }
 
@@ -174,5 +217,6 @@ impl Hash for Hotkey {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.trigger_key.hash(state);
         self.modifiers.hash(state);
+        self.trigger_timing.hash(state);
     }
 }

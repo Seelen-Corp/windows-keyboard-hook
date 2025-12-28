@@ -22,11 +22,10 @@ fn main() {
 
         m.set_global_keyboard_listener(|event| {
             if let KeyboardInputEvent::KeyDown {
-                vk_code,
+                key,
                 state: keyboard_state,
             } = event
             {
-                let key = VKey::from(vk_code);
                 println!("Global key down: {key:?}");
 
                 if key == VKey::Return {

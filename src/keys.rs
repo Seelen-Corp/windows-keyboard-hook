@@ -297,6 +297,19 @@ vkeys_definition! {
 
 #[allow(non_upper_case_globals)]
 impl VKey {
+    /// Similar to equals, but accounts for aliases and groups
+    pub fn matches(&self, other: &VKey) -> bool {
+        match self {
+            VKey::Shift => matches!(other, VKey::LShift | VKey::RShift | VKey::Shift),
+            VKey::Control => matches!(other, VKey::LControl | VKey::RControl | VKey::Control),
+            VKey::Menu => matches!(other, VKey::LMenu | VKey::RMenu | VKey::Menu),
+            // we don't gonna support differenciation between left and right windows keys
+            VKey::LWin => matches!(other, VKey::LWin | VKey::RWin),
+            VKey::RWin => matches!(other, VKey::LWin | VKey::RWin),
+            _ => self == other,
+        }
+    }
+
     pub fn is_windows_key(&self) -> bool {
         matches!(self, VKey::LWin | VKey::RWin)
     }

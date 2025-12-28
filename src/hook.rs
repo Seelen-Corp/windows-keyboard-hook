@@ -5,8 +5,8 @@
 
 use crate::error::{Result, WHKError};
 use crate::events::{EventLoopEvent, KeyAction, KeyboardInputEvent};
-use crate::log_on_dev;
 use crate::state::KEYBOARD_STATE;
+use crate::{log_on_dev, VKey};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::thread;
 use std::time::Duration;
@@ -113,60 +113,86 @@ unsafe extern "system" fn power_sleep_resume_proc(
 /// Hook procedure for handling keyboard events.
 /// https://learn.microsoft.com/en-us/windows/win32/winmsg/lowlevelkeyboardproc
 unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
-    if code >= 0 {
-        let event_type = wparam.0 as u32;
-        let Some(event_data) = (lparam.0 as *const KBDLLHOOKSTRUCT).as_ref() else {
-            return CallNextHookEx(None, code, wparam, lparam);
-        };
+    let next = || CallNextHookEx(None, code, wparam, lparam);
+    if code < 0 {
+        return next();
+    }
 
-        let vk_code = event_data.vkCode as u16;
-        if vk_code == SILENT_KEY.0 {
-            return CallNextHookEx(None, code, wparam, lparam);
-        }
+    let event_type = wparam.0 as u32;
+    let Some(event_data) = (lparam.0 as *const KBDLLHOOKSTRUCT).as_ref() else {
+        return next();
+    };
 
-        match event_type {
-            // We only care about key down events
-            WM_KEYDOWN | WM_SYSKEYDOWN => {
-                let state = {
-                    let mut state = KEYBOARD_STATE.lock().unwrap();
-                    state.keydown(vk_code);
-                    state.clone()
-                };
-                log_on_dev!("{state:?}");
+    let vk_code = event_data.vkCode as u16;
+    if vk_code == SILENT_KEY.0 {
+        return next();
+    }
 
-                // Clear the actions channel of any previous action
-                let response_rx = KeyAction::reciever();
-                while response_rx.try_recv().is_ok() {}
+    match event_type {
+        WM_KEYDOWN | WM_SYSKEYDOWN => {
+            let state = {
+                let mut state = KEYBOARD_STATE.lock().unwrap();
+                state.keydown(vk_code);
+                state.clone()
+            };
+            log_on_dev!("{state:?}");
 
-                EventLoopEvent::Keyboard(KeyboardInputEvent::KeyDown { vk_code, state }).send();
+            // Clear the actions channel of any previous action
+            let response_rx = KeyAction::reciever();
+            while response_rx.try_recv().is_ok() {}
 
-                // Wait for response on how to handle event
-                if let Ok(action) = response_rx.recv_timeout(TIMEOUT) {
-                    match action {
-                        KeyAction::Block => {
-                            return LRESULT(1);
-                        }
-                        KeyAction::Replace => {
+            let is_win_pressed = state.is_win_pressed();
+            EventLoopEvent::Keyboard(KeyboardInputEvent::KeyDown {
+                key: vk_code.into(),
+                state,
+            })
+            .send();
+
+            // Wait for response on how to handle event
+            if let Ok(action) = response_rx.recv_timeout(TIMEOUT) {
+                match action {
+                    KeyAction::Block => {
+                        if is_win_pressed {
+                            // to avoid windows alone key opening the start menu,
+                            // we need to send a silent key.
                             send_silent_key();
-                            return LRESULT(1);
                         }
-                        KeyAction::Allow => {}
+                        return LRESULT(1);
                     }
+                    KeyAction::Allow => {}
                 }
             }
-            WM_KEYUP | WM_SYSKEYUP => {
-                let state = {
-                    let mut state = KEYBOARD_STATE.lock().unwrap();
-                    state.keyup(vk_code);
-                    state.clone()
-                };
-                log_on_dev!("{state:?}");
-                EventLoopEvent::Keyboard(KeyboardInputEvent::KeyUp { vk_code, state }).send();
+        }
+        WM_KEYUP | WM_SYSKEYUP => {
+            let state = {
+                let mut state = KEYBOARD_STATE.lock().unwrap();
+                state.keyup(vk_code);
+                state.clone()
+            };
+            log_on_dev!("{state:?}");
+
+            // Clear the actions channel of any previous action
+            let response_rx = KeyAction::reciever();
+            while response_rx.try_recv().is_ok() {}
+
+            EventLoopEvent::Keyboard(KeyboardInputEvent::KeyUp {
+                key: vk_code.into(),
+                state,
+            })
+            .send();
+
+            // we can't block key up events as this can cause issues on applications with inifinite key down states
+            if let Ok(action) = response_rx.recv_timeout(TIMEOUT) {
+                if action == KeyAction::Block && VKey::from_vk_code(vk_code).is_windows_key() {
+                    // sending silent key will cause the windows keyup event to be ignored
+                    send_silent_key();
+                }
             }
-            _ => {}
-        };
-    }
-    CallNextHookEx(None, code, wparam, lparam)
+        }
+        _ => {}
+    };
+
+    next()
 }
 
 /// Sends a keydown and keyup event for Unassigned Virtual Key 0xE8.

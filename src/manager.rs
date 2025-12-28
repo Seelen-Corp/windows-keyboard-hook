@@ -8,7 +8,7 @@ use crate::client_executor::{self, run_on_executor_thread};
 use crate::error::WHKError::HotKeyAlreadyRegistered;
 use crate::error::{Result, WHKError};
 use crate::events::{EventLoopEvent, KeyAction, KeyboardInputEvent};
-use crate::hotkey::{Hotkey, TriggerBehavior};
+use crate::hotkey::{Hotkey, TriggerBehavior, TriggerTiming};
 use crate::state::KEYBOARD_STATE;
 use crate::VKey;
 use crate::{hook, log_on_dev};
@@ -148,47 +148,51 @@ impl HotkeyManager {
             }));
         }
 
-        let KeyboardInputEvent::KeyDown { vk_code, state } = event else {
-            return KeyAction::Allow;
+        let manager = HotkeyManager::current();
+
+        if manager.is_stealing_mode() {
+            // Stealing mode only affects KeyDown events
+            if let KeyboardInputEvent::KeyDown { key, state: _ } = &event {
+                if key == VKey::Escape {
+                    manager.free_keyboard();
+                }
+                // note: on ESC press we exit stealing mode, but still will block the ESC key
+                return KeyAction::Block;
+            }
+        }
+
+        // Extract vk_code, state, and event_type from both KeyDown and KeyUp events
+        let (key, state, event_type) = match event {
+            KeyboardInputEvent::KeyDown { key, state } => (key, state, TriggerTiming::OnKeyDown),
+            KeyboardInputEvent::KeyUp { key, state } => (key, state, TriggerTiming::OnKeyUp),
         };
 
-        let manager = HotkeyManager::current();
         let paused_state = HotkeysPauseHandler::current();
 
-        let is_stealing = manager.is_stealing_mode();
-        if is_stealing && VKey::from(vk_code) == VKey::Escape {
-            manager.free_keyboard();
-        }
-
-        // on ESC press we exit stealing mode, but still will block the ESC key
-        if is_stealing {
-            return if state.is_down(VKey::LWin) {
-                KeyAction::Replace
-            } else {
-                KeyAction::Block
-            };
-        }
-
-        if let Some(hotkeys) = HOTKEYS.lock().unwrap().get(&VKey::from(vk_code)) {
+        if let Some(hotkeys) = HOTKEYS.lock().unwrap().get(&key) {
             for hotkey in hotkeys {
+                // Skip if timing doesn't match
+                if hotkey.trigger_timing != event_type {
+                    continue;
+                }
+
+                // Skip if paused (unless bypass_pause)
                 if paused_state.is_paused() && !hotkey.bypass_pause {
                     continue;
                 }
 
-                if !hotkey.is_trigger_state(&state) {
+                // Check if keyboard state matches hotkey
+                if !hotkey.is_trigger_state(&key, &state) {
                     continue;
                 }
 
+                // Execute hotkey callback
                 run_on_executor_thread(hotkey.callback.clone());
+
+                // Return appropriate action based on behavior
                 return match hotkey.behaviour {
                     TriggerBehavior::PassThrough => KeyAction::Allow,
-                    TriggerBehavior::StopPropagation => {
-                        if state.is_down(VKey::LWin) {
-                            KeyAction::Replace
-                        } else {
-                            KeyAction::Block
-                        }
-                    }
+                    TriggerBehavior::StopPropagation => KeyAction::Block,
                 };
             }
         }
