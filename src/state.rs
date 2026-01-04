@@ -22,7 +22,7 @@ pub(crate) static KEYBOARD_STATE: LazyLock<Arc<Mutex<KeyboardState>>> = LazyLock
 pub struct KeyboardState {
     pub pressing: Vec<VKey>,
     /// History of pressed keys over a sequence.
-    /// This is cleared when all keys are released.
+    /// This is cleared when a new key is pressed after all keys were released.
     pub sequence: Vec<VKey>,
     needs_sync: bool,
     sync_count: u8,
@@ -40,6 +40,12 @@ impl KeyboardState {
             self.sync();
         }
         let key = key.into();
+
+        // Clear sequence when starting a fresh key press after all keys were released
+        if self.pressing.is_empty() {
+            self.sequence.clear();
+        }
+
         self.pressing.retain(|k| k != key);
         self.pressing.push(key);
         self.sequence.push(key);
@@ -49,9 +55,8 @@ impl KeyboardState {
     pub fn keyup<K: Into<VKey>>(&mut self, key: K) {
         let key = key.into();
         self.pressing.retain(|k| k != key);
-        if self.pressing.is_empty() {
-            self.sequence.clear();
-        }
+        // Note: sequence is NOT cleared here when pressing becomes empty
+        // It will be cleared on the next keydown() call (when starting a fresh sequence)
     }
 
     /// Checks if a key is currently pressed.
