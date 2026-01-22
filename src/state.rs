@@ -48,7 +48,16 @@ impl KeyboardState {
 
         self.pressing.retain(|k| k != key);
         self.pressing.push(key);
-        self.sequence.push(key);
+
+        // Add to sequence if:
+        // 1. It's different from the last key, OR
+        // 2. It's the same key but was NOT already pressed (re-press after release)
+        // This handles:
+        // - Hold: A B B B B C -> A B C (consecutive B's without release)
+        // - Re-press: A B (release B) B (release B) B -> A B
+        if self.sequence.last() != Some(&key) {
+            self.sequence.push(key);
+        }
     }
 
     /// Marks a key as released.
