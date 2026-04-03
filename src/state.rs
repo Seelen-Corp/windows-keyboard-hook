@@ -1,19 +1,8 @@
 //! This module provides the `KeyboardState` struct to track the state of keyboard keys.
 //! It supports key press (`keydown`), key release (`keyup`), and querying key state (`is_down`).
 
-use std::sync::{Arc, LazyLock, Mutex};
-
 use crate::{log_on_dev, VKey};
 use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
-
-/// this is an arbitrary number, on local tests it don't need more than 3, but we use 10 just to be sure
-const SYNC_COUNT_NEEDED_TO_BE_CONSIDERATED_SAFE: u8 = 10;
-
-/// singleton Keyboard State
-pub(crate) static KEYBOARD_STATE: LazyLock<Arc<Mutex<KeyboardState>>> = LazyLock::new(|| {
-    let mutex = Mutex::new(KeyboardState::new());
-    Arc::new(mutex)
-});
 
 /// Represents a state of pressed keys on a keyboard.
 /// Can be used to track the current state of the keyboard
@@ -25,7 +14,6 @@ pub struct KeyboardState {
     /// This is cleared when a new key is pressed after all keys were released.
     pub sequence: Vec<VKey>,
     needs_sync: bool,
-    sync_count: u8,
 }
 
 impl KeyboardState {
@@ -39,6 +27,7 @@ impl KeyboardState {
         if self.needs_sync {
             self.sync();
         }
+
         let key = key.into();
 
         // Clear sequence when starting a fresh key press after all keys were released
@@ -109,7 +98,6 @@ impl KeyboardState {
 
     pub fn request_syncronization(&mut self) {
         self.needs_sync = true;
-        self.sync_count = 0;
     }
 
     /// Checks the state of each pressed key against
@@ -119,11 +107,6 @@ impl KeyboardState {
             if !Self::async_is_key_down(vk_code) {
                 self.keyup(vk_code);
             }
-        }
-        self.sync_count += 1;
-        if self.sync_count >= SYNC_COUNT_NEEDED_TO_BE_CONSIDERATED_SAFE {
-            self.sync_count = 0;
-            self.needs_sync = false;
         }
     }
 

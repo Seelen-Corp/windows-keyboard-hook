@@ -3,27 +3,35 @@
 //! and releases, tracks the state of modifier keys, and communicates events
 //! via channels to the rest of the application.
 
-use crate::error::{Result, WHKError};
-use crate::events::{EventLoopEvent, KeyAction, KeyboardInputEvent};
-use crate::state::KEYBOARD_STATE;
-use crate::{log_on_dev, VKey};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
-use std::thread;
-use std::time::Duration;
-use windows::Win32::Foundation::{HANDLE, LPARAM, LRESULT, WPARAM};
-use windows::Win32::System::Power::{
-    RegisterSuspendResumeNotification, DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS,
+use std::{
+    cell::RefCell,
+    sync::atomic::{AtomicBool, AtomicU32, Ordering},
+    thread,
+    time::Duration,
 };
-use windows::Win32::System::Threading::GetCurrentThreadId;
-use windows::Win32::UI::Input::KeyboardAndMouse::{
-    SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS, KEYEVENTF_KEYUP,
-    VIRTUAL_KEY,
+
+use windows::Win32::{
+    Foundation::{LPARAM, LRESULT, WPARAM},
+    System::Threading::GetCurrentThreadId,
+    UI::{
+        Input::KeyboardAndMouse::{
+            SendInput, INPUT, INPUT_0, INPUT_KEYBOARD, KEYBDINPUT, KEYBD_EVENT_FLAGS,
+            KEYEVENTF_KEYUP, VIRTUAL_KEY,
+        },
+        WindowsAndMessaging::{
+            CallNextHookEx, DispatchMessageW, GetMessageW, PostThreadMessageW, SetWindowsHookExW,
+            TranslateMessage, KBDLLHOOKSTRUCT, MSG, WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP, WM_QUIT,
+            WM_SYSKEYDOWN, WM_SYSKEYUP,
+        },
+    },
 };
-use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, DispatchMessageW, GetMessageW, PostThreadMessageW, SetWindowsHookExW,
-    TranslateMessage, DEVICE_NOTIFY_CALLBACK, KBDLLHOOKSTRUCT, MSG, PBT_APMRESUMEAUTOMATIC,
-    PBT_APMRESUMESUSPEND, WH_KEYBOARD_LL, WM_KEYDOWN, WM_KEYUP, WM_QUIT, WM_SYSKEYDOWN,
-    WM_SYSKEYUP,
+
+use crate::{
+    error::{Result, WHKError},
+    events::{EventLoopEvent, KeyAction, KeyboardInputEvent},
+    log_on_dev,
+    state::KeyboardState,
+    VKey,
 };
 
 /// Timeout for blocking key events, measured in milliseconds.
@@ -35,32 +43,26 @@ const SILENT_KEY: VIRTUAL_KEY = VIRTUAL_KEY(0xE8);
 static STARTED: AtomicBool = AtomicBool::new(false);
 static HOOK_THREAD_ID: AtomicU32 = AtomicU32::new(0);
 
+thread_local! {
+    /// Per-thread keyboard state — only accessed from the hook thread.
+    static KEYBOARD_STATE: RefCell<KeyboardState> = {
+        let mut s = KeyboardState::new();
+        s.request_syncronization();
+        RefCell::new(s)
+    };
+}
+
 /// Starts the keyboard hook thread.
 pub fn start() -> Result<()> {
     if STARTED.load(Ordering::Relaxed) {
         return Err(WHKError::AlreadyStarted);
     }
 
-    // Create/clear keyboard state
-    KEYBOARD_STATE.lock().unwrap().clear();
-
     let (tx, rx) = crossbeam_channel::unbounded::<bool>();
     thread::spawn(move || unsafe {
         let Ok(_keyborad_handle) =
             SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_hook_proc), None, 0)
         else {
-            tx.send(false).unwrap();
-            return;
-        };
-
-        let mut recipient = DEVICE_NOTIFY_SUBSCRIBE_PARAMETERS {
-            Callback: Some(power_sleep_resume_proc),
-            ..Default::default()
-        };
-        let Ok(_suspend_handle) = RegisterSuspendResumeNotification(
-            HANDLE(&mut recipient as *mut _ as _),
-            DEVICE_NOTIFY_CALLBACK,
-        ) else {
             tx.send(false).unwrap();
             return;
         };
@@ -93,23 +95,6 @@ pub fn stop() {
     }
 }
 
-/// https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-registersuspendresumenotification
-/// https://learn.microsoft.com/en-us/windows/win32/api/powrprof/nc-powrprof-device_notify_callback_routine
-unsafe extern "system" fn power_sleep_resume_proc(
-    _context: *const core::ffi::c_void,
-    event: u32,
-    _setting: *const core::ffi::c_void,
-) -> u32 {
-    log_on_dev!("Received power event: {event}");
-    match event {
-        PBT_APMRESUMEAUTOMATIC | PBT_APMRESUMESUSPEND => {
-            KEYBOARD_STATE.lock().unwrap().request_syncronization();
-        }
-        _ => {}
-    }
-    0
-}
-
 /// Hook procedure for handling keyboard events.
 /// https://learn.microsoft.com/en-us/windows/win32/winmsg/lowlevelkeyboardproc
 unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
@@ -130,11 +115,11 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
 
     match event_type {
         WM_KEYDOWN | WM_SYSKEYDOWN => {
-            let state = {
-                let mut state = KEYBOARD_STATE.lock().unwrap();
+            let state = KEYBOARD_STATE.with(|cell| {
+                let mut state = cell.borrow_mut();
                 state.keydown(vk_code);
                 state.clone()
-            };
+            });
             log_on_dev!("{state:?}");
 
             // Clear the actions channel of any previous action
@@ -164,11 +149,11 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
             }
         }
         WM_KEYUP | WM_SYSKEYUP => {
-            let state = {
-                let mut state = KEYBOARD_STATE.lock().unwrap();
+            let state = KEYBOARD_STATE.with(|cell| {
+                let mut state = cell.borrow_mut();
                 state.keyup(vk_code);
                 state.clone()
-            };
+            });
             log_on_dev!("{state:?}");
 
             // Clear the actions channel of any previous action

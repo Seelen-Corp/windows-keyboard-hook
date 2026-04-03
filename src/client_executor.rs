@@ -37,7 +37,7 @@ pub(crate) fn start_executor_thread() {
     });
 }
 
-pub(crate) fn run_on_executor_thread<F: Fn() + Send + Sync + 'static>(cb: Arc<F>) {
+pub(crate) fn run_on_executor_thread(cb: Arc<dyn Fn() + Send + Sync + 'static>) {
     ClientAction::Call(cb).emit();
 }
 

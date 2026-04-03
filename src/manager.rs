@@ -9,20 +9,17 @@ use crate::error::WHKError::HotKeyAlreadyRegistered;
 use crate::error::{Result, WHKError};
 use crate::events::{EventLoopEvent, KeyAction, KeyboardInputEvent};
 use crate::hotkey::{Hotkey, TriggerBehavior, TriggerTiming};
-use crate::state::KEYBOARD_STATE;
 use crate::VKey;
 use crate::{hook, log_on_dev};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, LazyLock, Mutex};
+use std::sync::{Arc, LazyLock, RwLock};
 
-type HotkeysMap = Arc<Mutex<HashMap<VKey, HashSet<Hotkey>>>>;
+type HotkeysMap = Arc<RwLock<HashMap<VKey, HashSet<Hotkey>>>>;
 type KeyboardCallback = dyn Fn(KeyboardInputEvent) + Send + Sync + 'static;
 type FreeKeyboardCallback = dyn Fn() + Send + Sync + 'static;
 
-static HOTKEYS: LazyLock<HotkeysMap> =
-    LazyLock::new(|| Arc::new(Mutex::new(HotkeyManager::get_initial_hotkeys())));
-
+static HOTKEYS: LazyLock<HotkeysMap> = LazyLock::new(|| Arc::new(RwLock::new(HashMap::new())));
 static PAUSED: AtomicBool = AtomicBool::new(false);
 static STEALING: AtomicBool = AtomicBool::new(false);
 
@@ -89,7 +86,7 @@ impl HotkeyManager {
         let id = hotkey.as_hash();
         let was_already_inserted = !self
             .hotkeys
-            .lock()?
+            .write()?
             .entry(hotkey.trigger_key)
             .or_default()
             .insert(hotkey);
@@ -102,15 +99,15 @@ impl HotkeyManager {
 
     /// Unregisters a hotkey by its unique id.
     pub fn unregister_hotkey(&self, hotkey_id: u64) -> Result<()> {
-        for hotkeys in self.hotkeys.lock()?.values_mut() {
+        for hotkeys in self.hotkeys.write()?.values_mut() {
             hotkeys.retain(|hotkey| hotkey.as_hash() != hotkey_id);
         }
         Ok(())
     }
 
     /// Unregisters all hotkeys.
-    pub fn unregister_all(&mut self) -> Result<()> {
-        *self.hotkeys.lock()? = HotkeyManager::get_initial_hotkeys();
+    pub fn unregister_all(&self) -> Result<()> {
+        *self.hotkeys.write()? = HashMap::new();
         Ok(())
     }
 
@@ -169,7 +166,7 @@ impl HotkeyManager {
 
         let paused_state = HotkeysPauseHandler::current();
 
-        if let Some(hotkeys) = HOTKEYS.lock().unwrap().get(&key) {
+        if let Some(hotkeys) = HOTKEYS.read().unwrap().get(&key) {
             for hotkey in hotkeys {
                 // Skip if timing doesn't match
                 if hotkey.trigger_timing != event_type {
@@ -261,32 +258,5 @@ impl HotkeysPauseHandler {
     /// be ignored.
     pub fn is_paused(&self) -> bool {
         self.state.load(Ordering::Relaxed)
-    }
-}
-
-impl HotkeyManager {
-    /// this functions returns a map of initial hotkeys,
-    /// these are no-overridable as they are important system hotkeys
-    /// like lock screen and security screen
-    fn get_initial_hotkeys() -> HashMap<VKey, HashSet<Hotkey>> {
-        let lock_screen_shortcut = Hotkey::new(VKey::L, [VKey::LWin], || {
-            log_on_dev!("Locking screen");
-            KEYBOARD_STATE.lock().unwrap().request_syncronization();
-        })
-        .bypass_pause()
-        .behavior(TriggerBehavior::PassThrough);
-
-        let security_screen_shortcut =
-            Hotkey::new(VKey::Delete, [VKey::Control, VKey::Menu], || {
-                log_on_dev!("Security screen");
-                KEYBOARD_STATE.lock().unwrap().request_syncronization();
-            })
-            .bypass_pause()
-            .behavior(TriggerBehavior::PassThrough);
-
-        let mut hotkeys = HashMap::new();
-        hotkeys.insert(VKey::L, HashSet::from([lock_screen_shortcut]));
-        hotkeys.insert(VKey::Delete, HashSet::from([security_screen_shortcut]));
-        hotkeys
     }
 }

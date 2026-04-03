@@ -41,10 +41,24 @@ pub struct Hotkey {
     /// if true, the hotkey will only trigger if keys was pressed in a strict sequence
     pub strict_sequence: bool,
     /// callback function to execute when this hotkey is triggered
-    pub callback: Arc<Box<dyn Fn() + Send + Sync + 'static>>,
+    pub callback: Arc<dyn Fn() + Send + Sync + 'static>,
+    /// precomputed expected keyboard state for matching — avoids per-keypress allocation
+    pub(crate) expected_state: KeyboardState,
 }
 
 impl Hotkey {
+    fn compute_expected_state(trigger_key: VKey, modifiers: &[VKey], timing: TriggerTiming) -> KeyboardState {
+        let mut state = KeyboardState::new();
+        for key in modifiers {
+            state.keydown(*key);
+        }
+        state.keydown(trigger_key);
+        if timing == TriggerTiming::OnKeyUp {
+            state.keyup(trigger_key);
+        }
+        state
+    }
+
     fn base() -> Hotkey {
         Hotkey {
             trigger_key: VKey::None,
@@ -53,7 +67,8 @@ impl Hotkey {
             trigger_timing: TriggerTiming::OnKeyDown,
             bypass_pause: false,
             strict_sequence: false,
-            callback: Arc::new(Box::new(|| {})),
+            callback: Arc::new(|| {}),
+            expected_state: KeyboardState::new(),
         }
     }
 
@@ -63,14 +78,17 @@ impl Hotkey {
         M: AsRef<[VKey]>,
         F: Fn() + Send + Sync + 'static,
     {
+        let modifiers = modifiers.as_ref().to_vec();
+        let expected_state = Self::compute_expected_state(trigger_key, &modifiers, TriggerTiming::OnKeyDown);
         Self {
             trigger_key,
             behaviour: TriggerBehavior::StopPropagation,
             trigger_timing: TriggerTiming::OnKeyDown,
             bypass_pause: false,
             strict_sequence: false,
-            modifiers: modifiers.as_ref().to_vec(),
-            callback: Arc::new(Box::new(callback)),
+            modifiers,
+            callback: Arc::new(callback),
+            expected_state,
         }
     }
 
@@ -86,11 +104,13 @@ impl Hotkey {
 
     pub fn trigger(mut self, key: VKey) -> Self {
         self.trigger_key = key;
+        self.expected_state = Self::compute_expected_state(self.trigger_key, &self.modifiers, self.trigger_timing);
         self
     }
 
     pub fn modifiers<T: AsRef<[VKey]>>(mut self, keys: T) -> Self {
         self.modifiers = keys.as_ref().to_vec();
+        self.expected_state = Self::compute_expected_state(self.trigger_key, &self.modifiers, self.trigger_timing);
         self
     }
 
@@ -114,6 +134,7 @@ impl Hotkey {
     /// Sets when the hotkey should trigger (on key down or key up)
     pub fn trigger_timing(mut self, timing: TriggerTiming) -> Self {
         self.trigger_timing = timing;
+        self.expected_state = Self::compute_expected_state(self.trigger_key, &self.modifiers, self.trigger_timing);
         self
     }
 
@@ -121,7 +142,7 @@ impl Hotkey {
     where
         F: Fn() + Send + Sync + 'static,
     {
-        self.callback = Arc::new(Box::new(action));
+        self.callback = Arc::new(action);
         self
     }
 
@@ -139,21 +160,21 @@ impl Hotkey {
             return false;
         }
 
-        let expected_state = self.generate_expected_keyboard_state();
+        let expected = &self.expected_state;
 
         // Verify all required non-modifier keys are pressed
-        for key in &expected_state.pressing {
+        for key in &expected.pressing {
             if !key.is_modifier_key() && !state.is_down(*key) {
                 return false;
             }
         }
 
         if self.strict_sequence {
-            if expected_state.sequence.len() != state.sequence.len() {
+            if expected.sequence.len() != state.sequence.len() {
                 return false;
             }
 
-            for (i, key) in expected_state.sequence.iter().enumerate() {
+            for (i, key) in expected.sequence.iter().enumerate() {
                 if !key.matches(&state.sequence[i]) {
                     return false;
                 }
@@ -162,26 +183,10 @@ impl Hotkey {
 
         // Verify modifier key states match exactly
         // example hotkey "Win + A" won't trigger if "Win + Alt + A" is pressed
-        expected_state.is_win_pressed() == state.is_win_pressed()
-            && expected_state.is_menu_pressed() == state.is_menu_pressed()
-            && expected_state.is_shift_pressed() == state.is_shift_pressed()
-            && expected_state.is_control_pressed() == state.is_control_pressed()
-    }
-
-    /// Generates a `KeyboardState` representing the hotkey.
-    pub fn generate_expected_keyboard_state(&self) -> KeyboardState {
-        let mut keyboard_state = KeyboardState::new();
-
-        for key in &self.modifiers {
-            keyboard_state.keydown(*key);
-        }
-
-        keyboard_state.keydown(self.trigger_key);
-        if self.trigger_timing == TriggerTiming::OnKeyUp {
-            keyboard_state.keyup(self.trigger_key);
-        }
-
-        keyboard_state
+        expected.is_win_pressed() == state.is_win_pressed()
+            && expected.is_menu_pressed() == state.is_menu_pressed()
+            && expected.is_shift_pressed() == state.is_shift_pressed()
+            && expected.is_control_pressed() == state.is_control_pressed()
     }
 
     /// Returns a hash representing the hotkey combination
