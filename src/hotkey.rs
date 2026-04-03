@@ -47,7 +47,7 @@ pub struct Hotkey {
 }
 
 impl Hotkey {
-    fn compute_expected_state(trigger_key: VKey, modifiers: &[VKey], timing: TriggerTiming) -> KeyboardState {
+    pub(crate) fn compute_expected_state(trigger_key: VKey, modifiers: &[VKey], timing: TriggerTiming) -> KeyboardState {
         let mut state = KeyboardState::new();
         for key in modifiers {
             state.keydown(*key);
@@ -79,7 +79,6 @@ impl Hotkey {
         F: Fn() + Send + Sync + 'static,
     {
         let modifiers = modifiers.as_ref().to_vec();
-        let expected_state = Self::compute_expected_state(trigger_key, &modifiers, TriggerTiming::OnKeyDown);
         Self {
             trigger_key,
             behaviour: TriggerBehavior::StopPropagation,
@@ -88,7 +87,7 @@ impl Hotkey {
             strict_sequence: false,
             modifiers,
             callback: Arc::new(callback),
-            expected_state,
+            expected_state: KeyboardState::new(),
         }
     }
 
@@ -104,13 +103,11 @@ impl Hotkey {
 
     pub fn trigger(mut self, key: VKey) -> Self {
         self.trigger_key = key;
-        self.expected_state = Self::compute_expected_state(self.trigger_key, &self.modifiers, self.trigger_timing);
         self
     }
 
     pub fn modifiers<T: AsRef<[VKey]>>(mut self, keys: T) -> Self {
         self.modifiers = keys.as_ref().to_vec();
-        self.expected_state = Self::compute_expected_state(self.trigger_key, &self.modifiers, self.trigger_timing);
         self
     }
 
@@ -134,7 +131,6 @@ impl Hotkey {
     /// Sets when the hotkey should trigger (on key down or key up)
     pub fn trigger_timing(mut self, timing: TriggerTiming) -> Self {
         self.trigger_timing = timing;
-        self.expected_state = Self::compute_expected_state(self.trigger_key, &self.modifiers, self.trigger_timing);
         self
     }
 
