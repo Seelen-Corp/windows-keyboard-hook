@@ -78,12 +78,11 @@ impl HotkeyManager {
     }
 
     /// Registers a new hotkey.
-    pub fn register_hotkey(&self, mut hotkey: Hotkey) -> Result<u64> {
+    pub fn register_hotkey(&self, hotkey: impl Into<Hotkey>) -> Result<u64> {
+        let hotkey = hotkey.into();
         if hotkey.trigger_key == VKey::None {
             return Err(WHKError::HotkeyInvalidTriggerKey(hotkey.trigger_key));
         }
-
-        hotkey.expected_state = Hotkey::compute_expected_state(hotkey.trigger_key, &hotkey.modifiers, hotkey.trigger_timing);
 
         let id = hotkey.as_hash();
         let was_already_inserted = !self

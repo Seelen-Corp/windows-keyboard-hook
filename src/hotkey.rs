@@ -26,7 +26,8 @@ pub enum TriggerTiming {
     OnKeyUp,
 }
 
-/// Represents a keyboard shortcut that triggers an action
+/// Represents a finalised keyboard shortcut ready for registration.
+/// Construct via [`Hotkey::new`] / [`HotkeyBuilder::new`] and convert with `.into()`.
 pub struct Hotkey {
     /// key that must be pressed to trigger this hotkey
     pub trigger_key: VKey,
@@ -47,7 +48,27 @@ pub struct Hotkey {
 }
 
 impl Hotkey {
-    pub(crate) fn compute_expected_state(trigger_key: VKey, modifiers: &[VKey], timing: TriggerTiming) -> KeyboardState {
+    /// Convenience shorthand — returns a [`HotkeyBuilder`].
+    /// Equivalent to [`HotkeyBuilder::new`].
+    pub fn new<M, F>(trigger_key: VKey, modifiers: M, callback: F) -> HotkeyBuilder
+    where
+        M: AsRef<[VKey]>,
+        F: Fn() + Send + Sync + 'static,
+    {
+        HotkeyBuilder::new(trigger_key, modifiers, callback)
+    }
+
+    /// Convenience shorthand — returns a [`HotkeyBuilder`].
+    /// Equivalent to [`HotkeyBuilder::from_keys`].
+    pub fn from_keys<T: AsRef<[VKey]>>(keys: T) -> HotkeyBuilder {
+        HotkeyBuilder::from_keys(keys)
+    }
+
+    fn compute_expected_state(
+        trigger_key: VKey,
+        modifiers: &[VKey],
+        timing: TriggerTiming,
+    ) -> KeyboardState {
         let mut state = KeyboardState::new();
         for key in modifiers {
             state.keydown(*key);
@@ -59,90 +80,7 @@ impl Hotkey {
         state
     }
 
-    fn base() -> Hotkey {
-        Hotkey {
-            trigger_key: VKey::None,
-            modifiers: Vec::new(),
-            behaviour: TriggerBehavior::StopPropagation,
-            trigger_timing: TriggerTiming::OnKeyDown,
-            bypass_pause: false,
-            strict_sequence: false,
-            callback: Arc::new(|| {}),
-            expected_state: KeyboardState::new(),
-        }
-    }
-
-    /// Creates a new `Hotkey` instance.
-    pub fn new<M, F>(trigger_key: VKey, modifiers: M, callback: F) -> Hotkey
-    where
-        M: AsRef<[VKey]>,
-        F: Fn() + Send + Sync + 'static,
-    {
-        let modifiers = modifiers.as_ref().to_vec();
-        Self {
-            trigger_key,
-            behaviour: TriggerBehavior::StopPropagation,
-            trigger_timing: TriggerTiming::OnKeyDown,
-            bypass_pause: false,
-            strict_sequence: false,
-            modifiers,
-            callback: Arc::new(callback),
-            expected_state: KeyboardState::new(),
-        }
-    }
-
-    /// last key is used as trigger
-    pub fn from_keys<T: AsRef<[VKey]>>(keys: T) -> Self {
-        let mut keys: Vec<VKey> = keys.as_ref().to_vec();
-        let mut hotkey = Hotkey::base();
-        if let Some(last_key) = keys.pop() {
-            hotkey = hotkey.trigger(last_key);
-        }
-        hotkey.modifiers(keys)
-    }
-
-    pub fn trigger(mut self, key: VKey) -> Self {
-        self.trigger_key = key;
-        self
-    }
-
-    pub fn modifiers<T: AsRef<[VKey]>>(mut self, keys: T) -> Self {
-        self.modifiers = keys.as_ref().to_vec();
-        self
-    }
-
-    /// Sets the behavior when hotkey triggers
-    pub fn behavior(mut self, action: TriggerBehavior) -> Self {
-        self.behaviour = action;
-        self
-    }
-
-    /// Makes the hotkey work even when global hotkeys are paused
-    pub fn bypass_pause(mut self) -> Self {
-        self.bypass_pause = true;
-        self
-    }
-
-    pub fn strict_sequence(mut self) -> Self {
-        self.strict_sequence = true;
-        self
-    }
-
-    /// Sets when the hotkey should trigger (on key down or key up)
-    pub fn trigger_timing(mut self, timing: TriggerTiming) -> Self {
-        self.trigger_timing = timing;
-        self
-    }
-
-    pub fn action<F>(mut self, action: F) -> Self
-    where
-        F: Fn() + Send + Sync + 'static,
-    {
-        self.callback = Arc::new(action);
-        self
-    }
-
-    /// Executes the callback associated with the hotkey, in a separate thread.
+    /// Executes the callback associated with the hotkey.
     pub fn execute(&self) {
         (self.callback)()
     }
@@ -193,6 +131,27 @@ impl Hotkey {
     }
 }
 
+impl From<HotkeyBuilder> for Hotkey {
+    fn from(builder: HotkeyBuilder) -> Self {
+        let expected_state = Hotkey::compute_expected_state(
+            builder.trigger_key,
+            &builder.modifiers,
+            builder.trigger_timing,
+        );
+
+        Hotkey {
+            trigger_key: builder.trigger_key,
+            trigger_timing: builder.trigger_timing,
+            modifiers: builder.modifiers,
+            behaviour: builder.behaviour,
+            bypass_pause: builder.bypass_pause,
+            strict_sequence: builder.strict_sequence,
+            callback: builder.callback,
+            expected_state,
+        }
+    }
+}
+
 impl fmt::Debug for Hotkey {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("Hotkey")
@@ -219,5 +178,96 @@ impl Hash for Hotkey {
         self.trigger_key.hash(state);
         self.modifiers.hash(state);
         self.trigger_timing.hash(state);
+    }
+}
+
+/// Builder for constructing a [`Hotkey`]. Obtain one via [`Hotkey::new`] or [`HotkeyBuilder::new`].
+/// Call `.into()` or pass directly to [`crate::HotkeyManager::register_hotkey`] to finalise.
+pub struct HotkeyBuilder {
+    /// key that must be pressed to trigger this hotkey
+    pub trigger_key: VKey,
+    /// when the hotkey should trigger (on key down or key up)
+    pub trigger_timing: TriggerTiming,
+    /// keys that must be pressed before the trigger key ex: [CTRL] + [A]
+    pub modifiers: Vec<VKey>,
+    /// action to perform when this hotkey is triggered
+    pub behaviour: TriggerBehavior,
+    /// will ignore the `paused` global state
+    pub bypass_pause: bool,
+    /// if true, the hotkey will only trigger if keys was pressed in a strict sequence
+    pub strict_sequence: bool,
+    /// callback function to execute when this hotkey is triggered
+    pub callback: Arc<dyn Fn() + Send + Sync + 'static>,
+}
+
+impl HotkeyBuilder {
+    /// Creates a new [`HotkeyBuilder`].
+    pub fn new<M, F>(trigger_key: VKey, modifiers: M, callback: F) -> HotkeyBuilder
+    where
+        M: AsRef<[VKey]>,
+        F: Fn() + Send + Sync + 'static,
+    {
+        HotkeyBuilder {
+            trigger_key,
+            modifiers: modifiers.as_ref().to_vec(),
+            behaviour: TriggerBehavior::StopPropagation,
+            trigger_timing: TriggerTiming::OnKeyDown,
+            bypass_pause: false,
+            strict_sequence: false,
+            callback: Arc::new(callback),
+        }
+    }
+
+    /// Last key in `keys` is used as the trigger; the rest become modifiers.
+    pub fn from_keys<T: AsRef<[VKey]>>(keys: T) -> HotkeyBuilder {
+        let mut keys: Vec<VKey> = keys.as_ref().to_vec();
+        let trigger_key = keys.pop().unwrap_or(VKey::None);
+        HotkeyBuilder::new(trigger_key, keys, || {})
+    }
+
+    pub fn trigger(mut self, key: VKey) -> Self {
+        self.trigger_key = key;
+        self
+    }
+
+    pub fn modifiers<T: AsRef<[VKey]>>(mut self, keys: T) -> Self {
+        self.modifiers = keys.as_ref().to_vec();
+        self
+    }
+
+    /// Sets the behavior when hotkey triggers
+    pub fn behavior(mut self, action: TriggerBehavior) -> Self {
+        self.behaviour = action;
+        self
+    }
+
+    /// Makes the hotkey work even when global hotkeys are paused
+    pub fn bypass_pause(mut self) -> Self {
+        self.bypass_pause = true;
+        self
+    }
+
+    pub fn strict_sequence(mut self) -> Self {
+        self.strict_sequence = true;
+        self
+    }
+
+    /// Sets when the hotkey should trigger (on key down or key up)
+    pub fn trigger_timing(mut self, timing: TriggerTiming) -> Self {
+        self.trigger_timing = timing;
+        self
+    }
+
+    pub fn action<F>(mut self, action: F) -> Self
+    where
+        F: Fn() + Send + Sync + 'static,
+    {
+        self.callback = Arc::new(action);
+        self
+    }
+
+    /// Finalises the builder and returns a [`Hotkey`] with the expected state computed.
+    pub fn build(self) -> Hotkey {
+        self.into()
     }
 }

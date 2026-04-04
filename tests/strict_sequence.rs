@@ -23,7 +23,8 @@ fn test_strict_sequence_exact_match() {
     // Hotkey: Control + Shift + A (strict sequence)
     let hotkey = Hotkey::new(VKey::A, [VKey::Control, VKey::Shift], || {})
         .strict_sequence()
-        .trigger_timing(TriggerTiming::OnKeyDown);
+        .trigger_timing(TriggerTiming::OnKeyDown)
+        .build();
 
     let mut state = KeyboardState::new();
     state.keydown(VKey::Control);
@@ -41,7 +42,8 @@ fn test_strict_sequence_extra_key_before() {
     // Hotkey: Control + Shift + A (strict sequence)
     let hotkey = Hotkey::new(VKey::A, [VKey::Control, VKey::Shift], || {})
         .strict_sequence()
-        .trigger_timing(TriggerTiming::OnKeyDown);
+        .trigger_timing(TriggerTiming::OnKeyDown)
+        .build();
 
     let mut state = KeyboardState::new();
     state.keydown(VKey::B); // Extra key before
@@ -60,7 +62,8 @@ fn test_strict_sequence_extra_key_in_middle() {
     // Hotkey: Control + Shift + A (strict sequence)
     let hotkey = Hotkey::new(VKey::A, [VKey::Control, VKey::Shift], || {})
         .strict_sequence()
-        .trigger_timing(TriggerTiming::OnKeyDown);
+        .trigger_timing(TriggerTiming::OnKeyDown)
+        .build();
 
     let mut state = KeyboardState::new();
     state.keydown(VKey::Control);
@@ -79,7 +82,8 @@ fn test_strict_sequence_extra_key_after_trigger() {
     // Hotkey: Control + A (strict sequence)
     let hotkey = Hotkey::new(VKey::A, [VKey::Control], || {})
         .strict_sequence()
-        .trigger_timing(TriggerTiming::OnKeyDown);
+        .trigger_timing(TriggerTiming::OnKeyDown)
+        .build();
 
     let mut state = KeyboardState::new();
     state.keydown(VKey::Control);
@@ -99,7 +103,8 @@ fn test_strict_sequence_wrong_order() {
     // Hotkey: Control + Shift + A (strict sequence)
     let hotkey = Hotkey::new(VKey::A, [VKey::Control, VKey::Shift], || {})
         .strict_sequence()
-        .trigger_timing(TriggerTiming::OnKeyDown);
+        .trigger_timing(TriggerTiming::OnKeyDown)
+        .build();
 
     let mut state = KeyboardState::new();
     state.keydown(VKey::Shift); // Wrong order (Shift before Control)
@@ -124,7 +129,8 @@ fn test_strict_sequence_holding_modifier_pressing_trigger_twice() {
     // - Re-press (A → release A → A): does NOT add to sequence while Control is held
     let hotkey = Hotkey::new(VKey::A, [VKey::Control], || {})
         .strict_sequence()
-        .trigger_timing(TriggerTiming::OnKeyDown);
+        .trigger_timing(TriggerTiming::OnKeyDown)
+        .build();
 
     let mut state = KeyboardState::new();
     state.keydown(VKey::Control);
@@ -169,7 +175,8 @@ fn test_strict_sequence_modifier_key_pressed_multiple_times() {
     // - Re-press (Shift → release Shift → Shift): does NOT add to sequence while other keys are held
     let hotkey = Hotkey::new(VKey::A, [VKey::Control, VKey::Shift], || {})
         .strict_sequence()
-        .trigger_timing(TriggerTiming::OnKeyDown);
+        .trigger_timing(TriggerTiming::OnKeyDown)
+        .build();
 
     let mut state = KeyboardState::new();
     state.keydown(VKey::Control);
@@ -210,7 +217,8 @@ fn test_strict_sequence_on_key_up_exact_match() {
     // Expected sequence: [LWin] when released
     let hotkey = Hotkey::new(VKey::LWin, [], || {})
         .strict_sequence()
-        .trigger_timing(TriggerTiming::OnKeyUp);
+        .trigger_timing(TriggerTiming::OnKeyUp)
+        .build();
 
     let mut state = KeyboardState::new();
     state.keydown(VKey::LWin);
@@ -229,7 +237,8 @@ fn test_strict_sequence_on_key_up_with_extra_key() {
     // Sequence: [LWin, V] should NOT trigger
     let hotkey = Hotkey::new(VKey::LWin, [], || {})
         .strict_sequence()
-        .trigger_timing(TriggerTiming::OnKeyUp);
+        .trigger_timing(TriggerTiming::OnKeyUp)
+        .build();
 
     let mut state = KeyboardState::new();
     state.keydown(VKey::LWin);
@@ -248,7 +257,8 @@ fn test_strict_sequence_on_key_up_multiple_extra_keys() {
     // Simulating user's log: LWin, V, V, V, V, V sequence
     let hotkey = Hotkey::new(VKey::LWin, [], || {})
         .strict_sequence()
-        .trigger_timing(TriggerTiming::OnKeyUp);
+        .trigger_timing(TriggerTiming::OnKeyUp)
+        .build();
 
     let mut state = KeyboardState::new();
     state.keydown(VKey::LWin);
@@ -271,7 +281,8 @@ fn test_strict_sequence_on_key_up_with_modifiers_exact() {
     // Hotkey: Control + A (strict sequence, on key up of A)
     let hotkey = Hotkey::new(VKey::A, [VKey::Control], || {})
         .strict_sequence()
-        .trigger_timing(TriggerTiming::OnKeyUp);
+        .trigger_timing(TriggerTiming::OnKeyUp)
+        .build();
 
     let mut state = KeyboardState::new();
     state.keydown(VKey::Control);
@@ -289,7 +300,8 @@ fn test_strict_sequence_on_key_up_with_modifiers_extra_key() {
     // Hotkey: Control + A (strict sequence, on key up of A)
     let hotkey = Hotkey::new(VKey::A, [VKey::Control], || {})
         .strict_sequence()
-        .trigger_timing(TriggerTiming::OnKeyUp);
+        .trigger_timing(TriggerTiming::OnKeyUp)
+        .build();
 
     let mut state = KeyboardState::new();
     state.keydown(VKey::Control);
@@ -312,7 +324,8 @@ fn test_strict_sequence_resets_after_all_keys_released() {
     // Hotkey: LWin (strict sequence, on key up)
     let hotkey = Hotkey::new(VKey::LWin, [], || {})
         .strict_sequence()
-        .trigger_timing(TriggerTiming::OnKeyUp);
+        .trigger_timing(TriggerTiming::OnKeyUp)
+        .build();
 
     let mut state = KeyboardState::new();
 
@@ -405,8 +418,9 @@ fn test_sequence_does_not_clear_if_keys_still_pressed() {
 #[test]
 fn test_non_strict_sequence_allows_extra_keys() {
     // Hotkey: Control + A (NOT strict sequence)
-    let hotkey =
-        Hotkey::new(VKey::A, [VKey::Control], || {}).trigger_timing(TriggerTiming::OnKeyDown);
+    let hotkey = Hotkey::new(VKey::A, [VKey::Control], || {})
+        .trigger_timing(TriggerTiming::OnKeyDown)
+        .build();
 
     let mut state = KeyboardState::new();
     state.keydown(VKey::Control);
@@ -422,8 +436,9 @@ fn test_non_strict_sequence_allows_extra_keys() {
 #[test]
 fn test_non_strict_sequence_allows_repeated_presses() {
     // Hotkey: Control + A (NOT strict sequence)
-    let hotkey =
-        Hotkey::new(VKey::A, [VKey::Control], || {}).trigger_timing(TriggerTiming::OnKeyDown);
+    let hotkey = Hotkey::new(VKey::A, [VKey::Control], || {})
+        .trigger_timing(TriggerTiming::OnKeyDown)
+        .build();
 
     let mut state = KeyboardState::new();
     state.keydown(VKey::Control);
@@ -450,7 +465,8 @@ fn test_strict_sequence_complex_four_modifiers() {
         || {},
     )
     .strict_sequence()
-    .trigger_timing(TriggerTiming::OnKeyDown);
+    .trigger_timing(TriggerTiming::OnKeyDown)
+    .build();
 
     let mut state = KeyboardState::new();
     state.keydown(VKey::Control);
@@ -470,7 +486,8 @@ fn test_strict_sequence_complex_wrong_order() {
     // Hotkey: Control + Shift + Alt + A (strict sequence)
     let hotkey = Hotkey::new(VKey::A, [VKey::Control, VKey::Shift, VKey::Menu], || {})
         .strict_sequence()
-        .trigger_timing(TriggerTiming::OnKeyDown);
+        .trigger_timing(TriggerTiming::OnKeyDown)
+        .build();
 
     let mut state = KeyboardState::new();
     state.keydown(VKey::Menu); // Wrong order
@@ -505,7 +522,8 @@ fn test_strict_sequence_no_modifiers_single_key() {
     // Hotkey: Just A (no modifiers, strict sequence)
     let hotkey = Hotkey::new(VKey::A, [], || {})
         .strict_sequence()
-        .trigger_timing(TriggerTiming::OnKeyDown);
+        .trigger_timing(TriggerTiming::OnKeyDown)
+        .build();
 
     let mut state = KeyboardState::new();
     state.keydown(VKey::A);
@@ -521,7 +539,8 @@ fn test_strict_sequence_no_modifiers_but_other_key_pressed_first() {
     // Hotkey: Just A (no modifiers, strict sequence)
     let hotkey = Hotkey::new(VKey::A, [], || {})
         .strict_sequence()
-        .trigger_timing(TriggerTiming::OnKeyDown);
+        .trigger_timing(TriggerTiming::OnKeyDown)
+        .build();
 
     let mut state = KeyboardState::new();
     state.keydown(VKey::B); // Another key pressed first
@@ -547,7 +566,8 @@ fn test_strict_sequence_hold_single_key_on_key_up() {
     // Expected: Should trigger because sequence is still just [A]
     let hotkey = Hotkey::new(VKey::A, [], || {})
         .strict_sequence()
-        .trigger_timing(TriggerTiming::OnKeyUp);
+        .trigger_timing(TriggerTiming::OnKeyUp)
+        .build();
 
     let mut state = KeyboardState::new();
 
@@ -575,7 +595,8 @@ fn test_strict_sequence_hold_single_key_on_key_down() {
     // to the sequence, so the sequence remains [A] even after multiple keydowns
     let hotkey = Hotkey::new(VKey::A, [], || {})
         .strict_sequence()
-        .trigger_timing(TriggerTiming::OnKeyDown);
+        .trigger_timing(TriggerTiming::OnKeyDown)
+        .build();
 
     let mut state = KeyboardState::new();
 
@@ -612,7 +633,8 @@ fn test_strict_sequence_hold_with_modifier_on_key_up() {
     // Simulating: Press Control, press A and hold, then release A
     let hotkey = Hotkey::new(VKey::A, [VKey::Control], || {})
         .strict_sequence()
-        .trigger_timing(TriggerTiming::OnKeyUp);
+        .trigger_timing(TriggerTiming::OnKeyUp)
+        .build();
 
     let mut state = KeyboardState::new();
 
@@ -643,7 +665,8 @@ fn test_strict_sequence_hold_with_multiple_modifiers_on_key_up() {
     // Simulating: Press Control, Shift, then A (held), then release A
     let hotkey = Hotkey::new(VKey::A, [VKey::Control, VKey::Shift], || {})
         .strict_sequence()
-        .trigger_timing(TriggerTiming::OnKeyUp);
+        .trigger_timing(TriggerTiming::OnKeyUp)
+        .build();
 
     let mut state = KeyboardState::new();
 
@@ -674,7 +697,8 @@ fn test_strict_sequence_hold_modifier_key_on_key_up() {
     // Simulating: Press Control and HOLD it (multiple keydown), then press A, then release A
     let hotkey = Hotkey::new(VKey::A, [VKey::Control], || {})
         .strict_sequence()
-        .trigger_timing(TriggerTiming::OnKeyUp);
+        .trigger_timing(TriggerTiming::OnKeyUp)
+        .build();
 
     let mut state = KeyboardState::new();
 
@@ -704,7 +728,8 @@ fn test_strict_sequence_hold_both_modifier_and_trigger_on_key_up() {
     // Simulating: Press and hold Control, then press and hold A, then release A
     let hotkey = Hotkey::new(VKey::A, [VKey::Control], || {})
         .strict_sequence()
-        .trigger_timing(TriggerTiming::OnKeyUp);
+        .trigger_timing(TriggerTiming::OnKeyUp)
+        .build();
 
     let mut state = KeyboardState::new();
 
@@ -740,7 +765,8 @@ fn test_strict_sequence_hold_vs_extra_key() {
     // Hotkey: A (no modifiers, strict sequence, trigger on key up)
     let hotkey = Hotkey::new(VKey::A, [], || {})
         .strict_sequence()
-        .trigger_timing(TriggerTiming::OnKeyUp);
+        .trigger_timing(TriggerTiming::OnKeyUp)
+        .build();
 
     let mut state_hold = KeyboardState::new();
     let mut state_extra = KeyboardState::new();
@@ -773,7 +799,8 @@ fn test_strict_sequence_long_hold_on_key_up() {
     // This simulates a realistic scenario where user holds Win key for a long time
     let hotkey = Hotkey::new(VKey::LWin, [], || {})
         .strict_sequence()
-        .trigger_timing(TriggerTiming::OnKeyUp);
+        .trigger_timing(TriggerTiming::OnKeyUp)
+        .build();
 
     let mut state = KeyboardState::new();
 
