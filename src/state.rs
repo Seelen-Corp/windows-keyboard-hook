@@ -1,7 +1,7 @@
 //! This module provides the `KeyboardState` struct to track the state of keyboard keys.
 //! It supports key press (`keydown`), key release (`keyup`), and querying key state (`is_down`).
 
-use crate::{log_on_dev, VKey};
+use crate::{VKey, is_stealing_mode, log_on_dev};
 use windows::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState;
 
 /// Represents a state of pressed keys on a keyboard.
@@ -24,7 +24,8 @@ impl KeyboardState {
 
     /// Marks a key as pressed. If the key is already pressed, will send it to the end
     pub fn keydown<K: Into<VKey>>(&mut self, key: K) {
-        if self.needs_sync {
+        // on stealing mode sync will fail as we are blocking all the keyboard events
+        if self.needs_sync && !is_stealing_mode() {
             self.sync();
         }
 

@@ -18,3 +18,18 @@ mod utils;
 pub use hotkey::*;
 pub use keys::*;
 pub use manager::*;
+
+use std::sync::atomic::AtomicBool;
+
+/// indicates whether the hotkey manager is paused
+static PAUSED: AtomicBool = AtomicBool::new(false);
+/// indicates whether the hotkey manager is in stealing mode
+static STEALING: AtomicBool = AtomicBool::new(false);
+
+pub fn is_stealing_mode() -> bool {
+    STEALING.load(std::sync::atomic::Ordering::Acquire)
+}
+
+pub fn is_paused() -> bool {
+    PAUSED.load(std::sync::atomic::Ordering::Acquire)
+}

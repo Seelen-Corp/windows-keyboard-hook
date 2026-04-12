@@ -9,7 +9,7 @@ use crate::error::WHKError::HotKeyAlreadyRegistered;
 use crate::error::{Result, WHKError};
 use crate::events::{EventLoopEvent, KeyAction, KeyboardInputEvent};
 use crate::hotkey::{Hotkey, TriggerBehavior, TriggerTiming};
-use crate::VKey;
+use crate::{STEALING, VKey, is_stealing_mode};
 use crate::{hook, log_on_dev};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -20,8 +20,6 @@ type KeyboardCallback = dyn Fn(KeyboardInputEvent) + Send + Sync + 'static;
 type FreeKeyboardCallback = dyn Fn() + Send + Sync + 'static;
 
 static HOTKEYS: LazyLock<HotkeysMap> = LazyLock::new(|| Arc::new(RwLock::new(HashMap::new())));
-static PAUSED: AtomicBool = AtomicBool::new(false);
-static STEALING: AtomicBool = AtomicBool::new(false);
 
 static CLIENT_KEYBOARD_CALLBACK: ArcSwapOption<Box<KeyboardCallback>> =
     ArcSwapOption::const_empty();
@@ -37,24 +35,13 @@ static CLIENT_ON_FREE_KEYBOARD_CB: ArcSwapOption<Box<FreeKeyboardCallback>> =
 pub struct HotkeyManager {
     /// stores the registered hotkeys
     hotkeys: HotkeysMap,
-    /// indicates whether the hotkey manager is paused
-    paused: &'static AtomicBool,
-    /// indicates whether the hotkey manager is in stealing mode
-    stealing: &'static AtomicBool,
 }
 
 impl HotkeyManager {
     pub fn current() -> HotkeyManager {
         HotkeyManager {
             hotkeys: HOTKEYS.clone(),
-            paused: &PAUSED,
-            stealing: &STEALING,
         }
-    }
-
-    /// Returns whether the hotkey manager is in stealing mode.
-    pub fn is_stealing_mode(&self) -> bool {
-        self.stealing.load(Ordering::SeqCst)
     }
 
     /// Sets the stealing mode for the hotkey manager until the `ESC` key is pressed,
@@ -64,14 +51,14 @@ impl HotkeyManager {
         F: Fn() + Send + Sync + 'static,
     {
         log_on_dev!("Keyboard stealing mode enabled");
-        self.stealing.store(true, Ordering::SeqCst);
+        STEALING.store(true, Ordering::SeqCst);
         CLIENT_ON_FREE_KEYBOARD_CB.store(Some(Arc::new(Box::new(on_free))));
     }
 
     /// Disables the stealing mode for the hotkey manager.
     pub fn free_keyboard(&self) {
         log_on_dev!("Keyboard stealing mode disabled");
-        self.stealing.store(false, Ordering::SeqCst);
+        STEALING.store(false, Ordering::SeqCst);
         if let Some(on_free_cb) = CLIENT_ON_FREE_KEYBOARD_CB.swap(None) {
             run_on_executor_thread(on_free_cb);
         }
@@ -148,7 +135,7 @@ impl HotkeyManager {
 
         let manager = HotkeyManager::current();
 
-        if manager.is_stealing_mode() {
+        if is_stealing_mode() {
             // Stealing mode only affects KeyDown events
             if let KeyboardInputEvent::KeyDown { key, state: _ } = &event {
                 if key == VKey::Escape {
@@ -220,7 +207,7 @@ impl HotkeyManager {
 
     /// Signals the `HotkeyManager` to pause processing of hotkeys.
     pub fn pause_handler(&self) -> HotkeysPauseHandler {
-        HotkeysPauseHandler { state: self.paused }
+        HotkeysPauseHandler::current()
     }
 }
 
@@ -236,7 +223,7 @@ pub struct HotkeysPauseHandler {
 impl HotkeysPauseHandler {
     /// Creates a new `PauseHandler` that controls the pause state of the `HotkeyManager`.
     pub fn current() -> Self {
-        Self { state: &PAUSED }
+        Self { state: &crate::PAUSED }
     }
 
     /// Toggles the pause state of the `HotkeyManager`.
