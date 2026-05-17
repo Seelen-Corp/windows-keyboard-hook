@@ -7,10 +7,10 @@ use arc_swap::ArcSwapOption;
 use crate::client_executor::{self, run_on_executor_thread};
 use crate::error::WHKError::HotKeyAlreadyRegistered;
 use crate::error::{Result, WHKError};
-use crate::events::{EventLoopEvent, KeyAction, KeyboardInputEvent};
+use crate::events::{KeyAction, KeyboardInputEvent};
 use crate::hotkey::{Hotkey, TriggerBehavior, TriggerTiming};
-use crate::{STEALING, VKey, is_stealing_mode};
 use crate::{hook, log_on_dev};
+use crate::{is_stealing_mode, VKey, STEALING};
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, RwLock};
@@ -99,29 +99,13 @@ impl HotkeyManager {
         Ok(())
     }
 
-    /// Runs the main event loop to listen for keyboard events in a separate thread.
+    /// Starts the keyboard hook and returns the hook thread's join handle.
     ///
-    /// It matches events against registered hotkeys and executes the corresponding callbacks.
+    /// The handle can be joined to block the calling thread until
+    /// `stop_keyboard_capturing()` is called.
     pub fn start_keyboard_capturing() -> Result<std::thread::JoinHandle<()>> {
-        hook::start()?;
         client_executor::start_executor_thread();
-
-        let handle = std::thread::spawn(|| {
-            // clean event loop channel, to remove events before start
-            while EventLoopEvent::reciever().try_recv().is_ok() {}
-
-            'event_loop: while let Ok(loop_event) = EventLoopEvent::reciever().recv() {
-                let event = match loop_event {
-                    EventLoopEvent::Stop => break 'event_loop,
-                    EventLoopEvent::Keyboard(event) => event,
-                };
-
-                let key_action = HotkeyManager::process_keyboard_event(event);
-                key_action.send();
-            }
-        });
-
-        Ok(handle)
+        hook::start()
     }
 
     pub(crate) fn process_keyboard_event(event: KeyboardInputEvent) -> KeyAction {
@@ -185,11 +169,8 @@ impl HotkeyManager {
         KeyAction::Allow
     }
 
-    /// This gracefully interrupt the event loop by sending
-    /// a control signal. This allows the `HotkeyManager` to clean up resources and stop
-    /// processing keyboard events.
+    /// Stops the keyboard hook and cleans up resources.
     pub fn stop_keyboard_capturing() {
-        EventLoopEvent::send(EventLoopEvent::Stop);
         hook::stop();
         client_executor::stop_executor_thread();
     }
@@ -223,7 +204,9 @@ pub struct HotkeysPauseHandler {
 impl HotkeysPauseHandler {
     /// Creates a new `PauseHandler` that controls the pause state of the `HotkeyManager`.
     pub fn current() -> Self {
-        Self { state: &crate::PAUSED }
+        Self {
+            state: &crate::PAUSED,
+        }
     }
 
     /// Toggles the pause state of the `HotkeyManager`.

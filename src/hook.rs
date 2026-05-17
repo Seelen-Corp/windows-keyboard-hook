@@ -7,7 +7,6 @@ use std::{
     cell::RefCell,
     sync::atomic::{AtomicBool, AtomicU32, Ordering},
     thread,
-    time::Duration,
 };
 
 use windows::Win32::{
@@ -28,14 +27,12 @@ use windows::Win32::{
 
 use crate::{
     error::{Result, WHKError},
-    events::{EventLoopEvent, KeyAction, KeyboardInputEvent},
+    events::{KeyAction, KeyboardInputEvent},
     log_on_dev,
+    manager::HotkeyManager,
     state::KeyboardState,
     VKey,
 };
-
-/// Timeout for blocking key events, measured in milliseconds.
-const TIMEOUT: Duration = Duration::from_millis(250);
 
 /// Unassigned Virtual Key code used to suppress Windows Key events.
 const SILENT_KEY: VIRTUAL_KEY = VIRTUAL_KEY(0xE8);
@@ -52,14 +49,14 @@ thread_local! {
     };
 }
 
-/// Starts the keyboard hook thread.
-pub fn start() -> Result<()> {
+/// Starts the keyboard hook thread and returns its join handle.
+pub fn start() -> Result<thread::JoinHandle<()>> {
     if STARTED.load(Ordering::Relaxed) {
         return Err(WHKError::AlreadyStarted);
     }
 
     let (tx, rx) = crossbeam_channel::unbounded::<bool>();
-    thread::spawn(move || unsafe {
+    let handle = thread::spawn(move || unsafe {
         let Ok(_keyborad_handle) =
             SetWindowsHookExW(WH_KEYBOARD_LL, Some(keyboard_hook_proc), None, 0)
         else {
@@ -79,7 +76,7 @@ pub fn start() -> Result<()> {
 
     if rx.recv()? {
         STARTED.store(true, Ordering::Relaxed);
-        Ok(())
+        Ok(handle)
     } else {
         Err(WHKError::StartupFailed)
     }
@@ -122,30 +119,19 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
             });
             log_on_dev!("{state:?}");
 
-            // Clear the actions channel of any previous action
-            let response_rx = KeyAction::reciever();
-            while response_rx.try_recv().is_ok() {}
-
             let is_win_pressed = state.is_win_pressed();
-            EventLoopEvent::Keyboard(KeyboardInputEvent::KeyDown {
+            let action = HotkeyManager::process_keyboard_event(KeyboardInputEvent::KeyDown {
                 key: vk_code.into(),
                 state,
-            })
-            .send();
+            });
 
-            // Wait for response on how to handle event
-            if let Ok(action) = response_rx.recv_timeout(TIMEOUT) {
-                match action {
-                    KeyAction::Block => {
-                        if is_win_pressed {
-                            // to avoid windows alone key opening the start menu,
-                            // we need to send a silent key.
-                            send_silent_key();
-                        }
-                        return LRESULT(1);
-                    }
-                    KeyAction::Allow => {}
+            if action == KeyAction::Block {
+                if is_win_pressed {
+                    // to avoid windows alone key opening the start menu,
+                    // we need to send a silent key.
+                    send_silent_key();
                 }
+                return LRESULT(1);
             }
         }
         WM_KEYUP | WM_SYSKEYUP => {
@@ -156,22 +142,15 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
             });
             log_on_dev!("{state:?}");
 
-            // Clear the actions channel of any previous action
-            let response_rx = KeyAction::reciever();
-            while response_rx.try_recv().is_ok() {}
-
-            EventLoopEvent::Keyboard(KeyboardInputEvent::KeyUp {
+            let action = HotkeyManager::process_keyboard_event(KeyboardInputEvent::KeyUp {
                 key: vk_code.into(),
                 state,
-            })
-            .send();
+            });
 
             // we can't block key up events as this can cause issues on applications with inifinite key down states
-            if let Ok(action) = response_rx.recv_timeout(TIMEOUT) {
-                if action == KeyAction::Block && VKey::from_vk_code(vk_code).is_windows_key() {
-                    // sending silent key will cause the windows keyup event to be ignored
-                    send_silent_key();
-                }
+            if action == KeyAction::Block && VKey::from_vk_code(vk_code).is_windows_key() {
+                // sending silent key will cause the windows keyup event to be ignored
+                send_silent_key();
             }
         }
         _ => {}
